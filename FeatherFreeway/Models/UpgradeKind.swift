@@ -2,7 +2,7 @@ import Foundation
 
 /// Garage parts. Each has five levels bought with corn.
 enum UpgradeKind: String, CaseIterable, Codable, Sendable, Identifiable {
-    case rigTime, magnetTime, doubleTime, featherFill, eggCarton, convoyCap
+    case rigTime, magnetTime, doubleTime, featherFill, eggCarton, convoyCap, paddedTray
 
     static let maxLevel = 5
     private static let costs = [150, 350, 700, 1200, 2000]
@@ -17,6 +17,7 @@ enum UpgradeKind: String, CaseIterable, Codable, Sendable, Identifiable {
         case .featherFill: "Feather Gauge"
         case .eggCarton: "Egg Carton"
         case .convoyCap: "Convoy Whistle"
+        case .paddedTray: "Padded Tray"
         }
     }
 
@@ -28,6 +29,7 @@ enum UpgradeKind: String, CaseIterable, Codable, Sendable, Identifiable {
         case .featherFill: "Close calls fill the feather meter faster, so you Flap Hop sooner."
         case .eggCarton: "Carry more eggs for Egg Splat."
         case .convoyCap: "More lost chicks can follow you at once."
+        case .paddedTray: "Protects your Egg Express cargo from the first impacts."
         }
     }
 
@@ -47,6 +49,9 @@ enum UpgradeKind: String, CaseIterable, Codable, Sendable, Identifiable {
         case .featherFill: return "\(Int(stats.closeCallValue * 100 + 0.5))% per close call"
         case .eggCarton: return "\(stats.maxEggs) eggs"
         case .convoyCap: return "\(stats.convoyCap) chicks"
+        case .paddedTray:
+            let hits = stats.trayProtection
+            return "\(hits) protected hit\(hits == 1 ? "" : "s")"
         }
     }
 }
@@ -65,6 +70,7 @@ struct Loadout: Equatable, Sendable {
         var closeCallValue: Double
         var maxEggs: Int
         var convoyCap: Int
+        var trayProtection: Int
 
         init(levels: [UpgradeKind: Int]) {
             func lv(_ k: UpgradeKind) -> Int { min(UpgradeKind.maxLevel, max(0, levels[k] ?? 0)) }
@@ -74,6 +80,7 @@ struct Loadout: Equatable, Sendable {
             closeCallValue = 0.2 * (1 + 0.15 * Double(lv(.featherFill)))
             maxEggs = 3 + lv(.eggCarton)
             convoyCap = 5 + lv(.convoyCap)
+            trayProtection = lv(.paddedTray)
         }
     }
 

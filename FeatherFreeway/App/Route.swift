@@ -3,6 +3,7 @@ import Foundation
 /// Screens pushed on top of the lane pager.
 enum AppRoute: String, Hashable, CaseIterable {
     case routeMap
+    case deliveries
     case topPlayers
     case glovebox
     case settings

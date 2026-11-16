@@ -89,6 +89,13 @@ struct RoadsideView: View {
             .buttonStyle(PanelButtonStyle(color: .yellow, height: 86))
             .accessibilityIdentifier(AccessibilityID.Home.play)
 
+            Button { onOpen(.deliveries) } label: {
+                Label("EGG EXPRESS", systemImage: "shippingbox.fill")
+                    .font(.sign(26, relativeTo: .title2))
+            }
+            .buttonStyle(PanelButtonStyle(color: .cream, height: 62))
+            .accessibilityIdentifier("home.eggExpress")
+
             HStack(spacing: 10) {
                 Button { onOpen(.routeMap) } label: {
                     HStack(spacing: 8) {

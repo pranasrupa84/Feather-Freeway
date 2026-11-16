@@ -31,7 +31,18 @@ struct CitationView: View {
                             field("Offence", offence)
                         }
                     }
-                    grid
+                    if let order = summary.mode.deliveryOrder, let delivery = summary.delivery {
+                        HStack(spacing: 14) {
+                            field("Eggs delivered", "\(delivery.eggs) / \(order.eggs)")
+                            field("Time", String(format: "%.1f s", summary.duration))
+                            Spacer()
+                            StarRow(stars: outcome.stars, size: 26, spacing: 4)
+                        }
+                        if outcome.stars == 0 {
+                            Text("This order needs at least \(order.minimum) intact eggs.")
+                                .font(.rounded(.subheadline, weight: .bold))
+                        }
+                    } else { grid }
                     if let route = summary.mode.routeIndex.flatMap({ RouteCatalog.route($0) }) {
                         HStack(spacing: 10) {
                             StarRow(stars: outcome.stars, size: 34, spacing: 4)
@@ -69,11 +80,13 @@ struct CitationView: View {
     }
 
     private var location: String {
+        if let order = summary.mode.deliveryOrder { return order.name }
         if let route = summary.mode.routeIndex.flatMap({ RouteCatalog.route($0) }) { return "Route \(route.number), \(route.name)" }
         return "Endless Freeway, \(summary.furthestWorld.title)"
     }
 
     private var offence: String {
+        if let delivery = summary.delivery { return delivery.path?.rawValue ?? "Egg Express" }
         if summary.result == .cleared { return "Excessive fun to the finish line" }
         return summary.smashes > 10 ? "Reckless trucking, then a crash" : "Crossing the road without looking"
     }
@@ -84,7 +97,7 @@ struct CitationView: View {
                 .font(.sign(18, relativeTo: .caption))
                 .foregroundStyle(Theme.Colors.tomatoDeep)
                 .kerning(2)
-            Text(summary.result == .cleared ? "ROUTE CLEARED" : "TRIP OVER")
+            Text(summary.delivery != nil ? (outcome.stars > 0 ? "DELIVERY COMPLETE" : "ORDER MISSED") : (summary.result == .cleared ? "ROUTE CLEARED" : "TRIP OVER"))
                 .font(.sign(42, relativeTo: .largeTitle))
                 .foregroundStyle(Theme.Colors.ink)
                 .accessibilityAddTraits(.isHeader)
@@ -136,7 +149,7 @@ struct CitationView: View {
             Button(viewModel.playAgainTitle) { viewModel.playAgain() }
                 .buttonStyle(PanelButtonStyle(color: .green, height: 62, fontSize: 28))
                 .accessibilityIdentifier(AccessibilityID.Game.again)
-            Button("BACK TO THE ROADSIDE", action: onHome)
+            Button(summary.delivery == nil ? "BACK TO THE ROADSIDE" : "BACK TO ORDERS", action: onHome)
                 .buttonStyle(PanelButtonStyle(color: .cream, height: 56, fontSize: 22))
                 .accessibilityIdentifier(AccessibilityID.Game.home)
         }
@@ -146,7 +159,7 @@ struct CitationView: View {
     @ViewBuilder
     private var stamp: some View {
         let art = outcome.isNewBestScore || (summary.mode == .endless && outcome.isNewBestMeters) ? Art.stampRecord
-            : summary.result == .cleared ? Art.stampClear : Art.stampCrash
+            : (summary.delivery != nil ? outcome.stars > 0 : summary.result == .cleared) ? Art.stampClear : Art.stampCrash
         Image(art)
             .resizable()
             .scaledToFit()

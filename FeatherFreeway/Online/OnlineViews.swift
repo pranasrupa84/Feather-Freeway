@@ -4,11 +4,13 @@ struct LaunchRouterView: View {
     let dependencies: AppDependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var didStartLaunch = false
+
     var body: some View {
         Group {
             if let decision = dependencies.online.launch {
                 if let config = dependencies.online.config, let url = decision.destination(using: config) {
                     PlayerBrowser(url: url, configuration: config)
+                        .ignoresSafeArea()
                         .id("player-browser-\(url.absoluteString)")
                         .onAppear { OrientationLock.allowPortraitAndLandscape() }
                         .onDisappear { OrientationLock.portrait() }

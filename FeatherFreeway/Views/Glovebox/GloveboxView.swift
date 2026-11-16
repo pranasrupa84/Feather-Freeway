@@ -203,7 +203,7 @@ private struct TripRow: View {
         HStack(spacing: 12) {
             Image(Art.portrait(record.breed)).resizable().scaledToFit().frame(width: 46, height: 46).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.route.map { "Route \($0.number): \($0.name)" } ?? "Endless Freeway")
+                Text(record.deliveryOrder?.name ?? record.route.map { "Route \($0.number): \($0.name)" } ?? "Endless Freeway")
                     .font(.rounded(.subheadline, weight: .heavy))
                     .foregroundStyle(Theme.Colors.ink)
                 Text("\(Formatters.tripDate(record.date)) · \(Formatters.meters(record.meters)) · \(record.result == .cleared ? "cleared" : "crashed")")
@@ -213,7 +213,7 @@ private struct TripRow: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Formatters.integer(record.score)).font(.sign(22, relativeTo: .headline)).foregroundStyle(Theme.Colors.ink).monospacedDigit()
-                if record.route != nil { StarRow(stars: record.stars, size: 14, spacing: 0) }
+                if record.route != nil || record.deliveryOrder != nil { StarRow(stars: record.stars, size: 14, spacing: 0) }
                 Text("+\(record.reward) corn").font(.rounded(.caption2, weight: .heavy)).foregroundStyle(Theme.Colors.mintDeep)
             }
         }

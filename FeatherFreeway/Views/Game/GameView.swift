@@ -89,6 +89,7 @@ private struct RunHUDView: View {
                     .accessibilityIdentifier(AccessibilityID.Game.pause)
             }
             if let progress = hud.progress { RouteProgress(progress: progress, breed: viewModel.breed) }
+            if let order = viewModel.deliveryOrder { cargoPanel(order, hud: hud) }
             HStack(spacing: 8) {
                 if hud.mechanics.contains(.flap) { FeatherMeter(value: hud.feather, ready: hud.isFlapReady) }
                 Spacer(minLength: 0)
@@ -114,6 +115,45 @@ private struct RunHUDView: View {
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 10)
+    }
+
+    private func cargoPanel(_ order: DeliveryOrder, hud: RunHUD) -> some View {
+        VStack(spacing: 5) {
+            HStack {
+                Text("CARGO \(hud.cargoEggs)/\(order.eggs)")
+                    .foregroundStyle(hud.cargoEggs < order.minimum ? Theme.Colors.tomatoDeep : Theme.Colors.ink)
+                    .accessibilityIdentifier("game.delivery.cargo")
+                Spacer()
+                Text(hud.deliveryPath?.rawValue ?? "Fork at \(order.forkMeters) m")
+                    .accessibilityIdentifier("game.delivery.path")
+                Spacer()
+                Text("\(hud.deliverySeconds)s / \(order.goldTime)s")
+                    .monospacedDigit()
+            }
+            .font(.rounded(.caption, weight: .heavy))
+            HStack(spacing: 5) {
+                ForEach(0..<order.eggs, id: \.self) { egg in
+                    Image(Art.egg).resizable().scaledToFit().frame(height: 18)
+                        .opacity(egg < hud.cargoEggs ? 1 : 0.22)
+                }
+            }
+            .accessibilityHidden(true)
+            if hud.canChooseDeliveryPath {
+                HStack(spacing: 8) {
+                    Button("SHORTCUT") { viewModel.chooseDeliveryPath(.shortcut) }
+                        .buttonStyle(PanelButtonStyle(color: .yellow, height: 46, fontSize: 18))
+                        .accessibilityIdentifier("game.delivery.shortcut")
+                    Button("DETOUR") { viewModel.chooseDeliveryPath(.detour) }
+                        .buttonStyle(PanelButtonStyle(color: .green, height: 46, fontSize: 18))
+                        .accessibilityIdentifier("game.delivery.detour")
+                }
+                Text("Shortcut has extra potholes. Keep driving to take the detour.")
+                    .font(.rounded(.caption2, weight: .bold))
+            }
+        }
+        .padding(9)
+        .background(Theme.Colors.cream, in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(Theme.Colors.ink)
     }
 
     @ViewBuilder
@@ -355,11 +395,11 @@ private struct ReadyTicket: View {
         VStack {
             Spacer()
             VStack(alignment: .leading, spacing: 12) {
-                Text(viewModel.route == nil ? "ENDLESS FREEWAY" : "ROUTE \(viewModel.route?.number ?? 1)")
+                Text(viewModel.deliveryOrder != nil ? "EGG EXPRESS" : viewModel.route == nil ? "ENDLESS FREEWAY" : "ROUTE \(viewModel.route?.number ?? 1)")
                     .font(.sign(18, relativeTo: .caption))
                     .foregroundStyle(Theme.Colors.tomatoDeep)
                     .kerning(3)
-                Text((viewModel.route?.name ?? "How far can you run?").uppercased())
+                Text((viewModel.deliveryOrder?.name ?? viewModel.route?.name ?? "How far can you run?").uppercased())
                     .font(.sign(36, relativeTo: .largeTitle))
                     .foregroundStyle(Theme.Colors.ink)
                     .lineLimit(2)
@@ -371,7 +411,11 @@ private struct ReadyTicket: View {
                         Text(viewModel.breed.traitDetail).font(.rounded(.caption, weight: .medium)).foregroundStyle(Theme.Colors.inkSoft).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                if let route = viewModel.route {
+                if let order = viewModel.deliveryOrder {
+                    Text("Deliver at least \(order.minimum) of \(order.eggs) eggs. Gold needs every egg in \(order.goldTime)s. Choose your road at the fork.")
+                        .font(.rounded(.subheadline, weight: .bold))
+                        .foregroundStyle(Theme.Colors.ink)
+                } else if let route = viewModel.route {
                     VStack(alignment: .leading, spacing: 4) {
                         goal(1, "Reach the finish (\(Formatters.meters(route.meters)))", route)
                         goal(2, "Collect \(route.cornGoal) corn", route)

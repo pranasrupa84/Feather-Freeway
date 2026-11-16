@@ -26,6 +26,10 @@ struct RunHUD: Equatable {
     var world: World = .farm
     var lanes = 3
     var mechanics: Mechanics = .all
+    var cargoEggs = 0
+    var deliverySeconds = 0
+    var deliveryPath: DeliveryPath?
+    var canChooseDeliveryPath = false
 
     @MainActor
     init(session: RunSession? = nil) {
@@ -51,6 +55,12 @@ struct RunHUD: Equatable {
         world = s.currentWorld
         lanes = s.lanesHere
         mechanics = s.config.mechanics
+        if s.setup.mode.deliveryOrder != nil {
+            cargoEggs = s.cargoEggs
+            deliverySeconds = Int(s.time)
+            deliveryPath = s.deliveryPath
+            canChooseDeliveryPath = s.canChooseDeliveryPath
+        }
     }
 }
 
@@ -109,13 +119,21 @@ final class GameViewModel {
     }
 
     var route: Route? { setup.mode.routeIndex.flatMap(RouteCatalog.route) }
+    var deliveryOrder: DeliveryOrder? { setup.mode.deliveryOrder }
+
+    func chooseDeliveryPath(_ path: DeliveryPath) {
+        guard isRunning, let session = scene?.session, session.canChooseDeliveryPath else { return }
+        session.chooseDeliveryPath(path)
+        haptics.selection()
+        refreshHUD()
+    }
     var breed: Breed { profileStore.profile.selectedBreed }
     var isRunning: Bool { phase == .running }
     var isShowcase: Bool { showcase }
     var isPaused: Bool { phase == .paused }
     var bestScore: Int { profileStore.profile.bestScore }
     var routeStars: Int { route.map { profileStore.profile.stars(forRoute: $0.index) } ?? 0 }
-    var title: String { route.map { "Route \($0.number): \($0.name)" } ?? "Endless Freeway" }
+    var title: String { deliveryOrder?.name ?? route.map { "Route \($0.number): \($0.name)" } ?? "Endless Freeway" }
 
     // MARK: - Scene
 
@@ -261,7 +279,7 @@ final class GameViewModel {
         scene?.isRunning = false
         let outcome = profileStore.recordRun(session.summary)
         sound.stopMusic()
-        if outcome.summary.result == .cleared {
+        if outcome.summary.result == .cleared, deliveryOrder == nil || outcome.stars > 0 {
             sound.play(.finish)
             haptics.notify(.success)
         } else {
@@ -334,7 +352,20 @@ extension GameViewModel: FreewaySceneDelegate {
             show(Banner(title: "BIG RIG!", detail: "Smash everything", style: .red, art: Art.rig), seconds: 1.4)
         case .rigEnd: sound.play(.dive)
         case .smash: sound.play(.smash); haptics.impact(.heavy)
-        case .bump: haptics.impact(.heavy)
+        case .bump:
+            haptics.impact(.heavy)
+            if deliveryOrder != nil {
+                let lost = hud.cargoEggs - session.cargoEggs
+                if lost > 0 {
+                    sound.play(.splat)
+                    show(Banner(title: lost == 1 ? "EGG CRACKED" : "\(lost) EGGS CRACKED",
+                                detail: "\(session.cargoEggs) intact", style: .red, art: Art.egg), seconds: 1.2)
+                }
+            }
+        case .cargoProtected(let remaining):
+            sound.play(.powerUp)
+            let detail = remaining == 0 ? "The tray took the hit" : "\(remaining) protected hit\(remaining == 1 ? "" : "s") left"
+            show(Banner(title: "CARGO SAVED", detail: detail, style: .green, art: Art.upgrade(.paddedTray)), seconds: 1.3)
         case .cushion:
             sound.play(.honk)
             show(Banner(title: "FLUFFY CUSHION", detail: "Mabel shrugs off the bump", style: .blue, art: Art.portrait(.mabel)), seconds: 1.4)

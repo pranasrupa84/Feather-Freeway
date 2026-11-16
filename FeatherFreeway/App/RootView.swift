@@ -79,6 +79,8 @@ struct RootView: View {
             TopPlayersView(online: dependencies.online)
         case .routeMap:
             RouteMapView(onPlay: requestPlay)
+        case .deliveries:
+            DeliveryBoard(profile: dependencies.profileStore.profile, onPlay: requestPlay)
         case .glovebox:
             GloveboxView()
         case .settings:

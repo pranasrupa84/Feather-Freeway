@@ -4,10 +4,19 @@ import Security
 
 /// Serializes authentication and stores the refresh credential in the device keychain.
 actor PlayerAPI {
+    private enum NetworkTimeout {
+        static let request: TimeInterval = 12
+        static let resource: TimeInterval = 24
+    }
     let config: OnlineConfiguration
     private var session: AuthSession?
     private var authentication: Task<AuthSession, Error>?
-    private let network = URLSession(configuration: .ephemeral)
+    private let network: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = NetworkTimeout.request
+        configuration.timeoutIntervalForResource = NetworkTimeout.resource
+        return URLSession(configuration: configuration)
+    }()
     private let keychainAccount: String
 
     nonisolated struct AuthSession: Codable, Sendable {
@@ -99,7 +108,7 @@ actor PlayerAPI {
     private func raw(path: String, method: String, body: Data?, token: String?) async throws -> Data {
         guard let base = config.baseURL,
               let url = URL(string: path, relativeTo: base.appendingPathComponent("/")) else { throw OnlineError.unavailable }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: NetworkTimeout.request)
         request.httpMethod = method
         request.httpBody = body
         request.setValue(config.publishableKey, forHTTPHeaderField: "apikey")

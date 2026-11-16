@@ -20,8 +20,6 @@ workflows:
         script: keychain add-certificates
       - name: Apply provisioning profiles
         script: xcode-project use-profiles
-      - name: Set unique build number
-        script: agvtool new-version -all "$((1213 + BUILD_NUMBER))"
       - name: Build signed IPA
         script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME" --config Release
     artifacts:

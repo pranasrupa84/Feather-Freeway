@@ -12,6 +12,8 @@ final class PlayerProfile {
     var featherFillLevel: Int = 0
     var eggCartonLevel: Int = 0
     var convoyCapLevel: Int = 0
+    var paddedTrayLevel: Int = 0
+    var deliveryMedals: [Int] = []
 
     var unlockedBreedIDs: [String] = [Breed.starter.rawValue]
     var selectedBreedID: String = Breed.starter.rawValue
@@ -58,6 +60,7 @@ final class PlayerProfile {
         case .featherFill: featherFillLevel
         case .eggCarton: eggCartonLevel
         case .convoyCap: convoyCapLevel
+        case .paddedTray: paddedTrayLevel
         }
     }
 
@@ -69,11 +72,16 @@ final class PlayerProfile {
         case .featherFill: featherFillLevel = level
         case .eggCarton: eggCartonLevel = level
         case .convoyCap: convoyCapLevel = level
+        case .paddedTray: paddedTrayLevel = level
         }
     }
 
     func stars(forRoute index: Int) -> Int {
         routeStars.indices.contains(index) ? routeStars[index] : 0
+    }
+
+    func medals(forDelivery id: Int) -> Int {
+        deliveryMedals.indices.contains(id) ? deliveryMedals[id] : 0
     }
 
     /// Routes unlock one after another: the next one opens when the previous has a star.
@@ -140,4 +148,5 @@ final class RunRecord {
     var result: RunResult { RunResult(rawValue: resultRaw) ?? .crashed }
     var breed: Breed { Breed(rawValue: breedID) ?? .starter }
     var route: Route? { RouteCatalog.route(routeIndex) }
+    var deliveryOrder: DeliveryOrder? { DeliveryOrder.orders.first { modeKey == "delivery-\($0.id)" } }
 }
