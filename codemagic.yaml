@@ -22,6 +22,36 @@ workflows:
         script: xcode-project use-profiles
       - name: Build signed IPA
         script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME" --config Release
+      - name: Verify signed IPA version before App Store Connect upload
+        script: |
+          set -e
+          python3 - <<'VERIFY_IPA'
+          import plistlib
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          ipas = list(Path("build/ios/ipa").glob("*.ipa"))
+          if len(ipas) != 1:
+              raise SystemExit(f"Expected one signed IPA, found {len(ipas)}")
+          with ZipFile(ipas[0]) as archive:
+              app_plists = [
+                  name for name in archive.namelist()
+                  if name.startswith("Payload/") and name.endswith(".app/Info.plist")
+                  and name.count("/") == 2
+              ]
+              if len(app_plists) != 1:
+                  raise SystemExit("Could not identify the main app Info.plist")
+              app = plistlib.loads(archive.read(app_plists[0]))
+          actual = (
+              app.get("CFBundleIdentifier"),
+              app.get("CFBundleShortVersionString"),
+              app.get("CFBundleVersion"),
+          )
+          expected = ("com.featherfreeway.game27", "1.1", "1216")
+          if actual != expected:
+              raise SystemExit(f"Unexpected IPA metadata: {actual}; expected {expected}")
+          print("Verified signed Feather Freeway IPA: version 1.1, build 1216")
+          VERIFY_IPA
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
