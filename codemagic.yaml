@@ -10,7 +10,7 @@ workflows:
         BUNDLE_ID: com.featherfreeway.game27
         XCODE_PROJECT: FeatherFreeway.xcodeproj
         XCODE_SCHEME: FeatherFreeway
-      xcode: latest
+      xcode: "26.5"
     scripts:
       - name: Initialize signing keychain
         script: keychain initialize
