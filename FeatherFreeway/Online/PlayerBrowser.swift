@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import MessageUI
 
 struct PlayerBrowser: UIViewControllerRepresentable {
     let url: URL
@@ -11,7 +12,7 @@ struct PlayerBrowser: UIViewControllerRepresentable {
 }
 
 @MainActor
-final class PlayerBrowserController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class PlayerBrowserController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, MFMailComposeViewControllerDelegate {
     private let initialURL: URL
     private let configuration: OnlineConfiguration
     private var web: WKWebView!
@@ -25,9 +26,14 @@ final class PlayerBrowserController: UIViewController, WKNavigationDelegate, WKU
     private var downloads: [ObjectIdentifier: URL] = [:]
     private var downloadDirectories: [URL] = []
     private var failedURL: URL?
+    private var returnHistory: [URL] = []
+    private var lastCommittedPageURL: URL?
+    private var primaryBlankNavigation = false
+    private var hasLoadedInitialPage = false
+    private var restoringReturnURL = false
 
     init(url: URL, configuration: OnlineConfiguration) {
-        initialURL = url; self.configuration = configuration
+        initialURL = url; self.configuration = configuration; lastCommittedPageURL = url
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
@@ -95,62 +101,167 @@ final class PlayerBrowserController: UIViewController, WKNavigationDelegate, WKU
         ]
         refreshControls(); load(initialURL)
     }
-    private func load(_ url: URL) {
-        guard configuration.allows(url) else { showError("This destination is unavailable."); return }
+    private func load(_ url: URL, restoringFromBack: Bool = false) {
+        guard allowsWebNavigation(to: url) else { showError("This destination is unavailable."); return }
         errorPanel.isHidden = true
+        restoringReturnURL = restoringFromBack
         web.load(URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30))
     }
+    private func allowsWebNavigation(to url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              url.host != nil, url.user == nil, url.password == nil else { return false }
+        return scheme == "http" || configuration.allows(url)
+    }
+    private func captureReturnPage() {
+        // Provisional redirects can change web.url before a new page actually commits.
+        let origin = lastCommittedPageURL ?? initialURL
+        guard returnHistory.last != origin else { return }
+        returnHistory.append(origin)
+    }
     private func refreshControls() {
-        back.isEnabled = web.canGoBack; forward.isEnabled = web.canGoForward
+        back.isEnabled = canNavigateBack(); forward.isEnabled = web.canGoForward
         back.alpha = back.isEnabled ? 1 : 0.35; forward.alpha = forward.isEnabled ? 1 : 0.35
         progress.progress = Float(web.estimatedProgress); progress.isHidden = web.estimatedProgress >= 1
     }
-    @objc private func goBack() { if web.canGoBack { web.goBack() } }
-    @objc private func goForward() { if web.canGoForward { web.goForward() } }
+    private func canNavigateBack() -> Bool {
+        returnHistory.contains { $0 != web.url } || (primaryBlankNavigation && web.url != initialURL)
+    }
+    @objc private func goBack() {
+        _ = navigateBack()
+    }
+    @discardableResult
+    private func navigateBack() -> Bool {
+        while let returnURL = returnHistory.popLast() {
+            guard returnURL != web.url else { continue }
+            primaryBlankNavigation = false
+            if let item = web.backForwardList.backList.last(where: { $0.url == returnURL }),
+               web.go(to: item) != nil { return true }
+            web.stopLoading()
+            load(returnURL, restoringFromBack: true)
+            return true
+        }
+        if primaryBlankNavigation {
+            primaryBlankNavigation = false
+            web.stopLoading()
+            load(initialURL, restoringFromBack: true)
+            return true
+        }
+        return false
+    }
+    @objc private func goForward() {
+        guard web.canGoForward else { return }
+        captureReturnPage()
+        web.goForward()
+    }
     @objc private func reloadPage() { load(web.url ?? initialURL) }
     @objc private func retryPage() { load(failedURL ?? web.url ?? initialURL) }
     private func showError(_ message: String) { errorLabel.text = message; errorPanel.isHidden = false; progress.isHidden = true }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { errorPanel.isHidden = true; progress.isHidden = false }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { failedURL = nil; errorPanel.isHidden = true; refreshControls() }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if let url = webView.url, allowsWebNavigation(to: url) { lastCommittedPageURL = url }
+        refreshControls()
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        hasLoadedInitialPage = true
+        restoringReturnURL = false
+        failedURL = nil
+        errorPanel.isHidden = true
+        refreshControls()
+    }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handle(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handle(error) }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { showError("The page stopped responding.") }
     private func handle(_ error: Error) {
         let value = error as NSError
         guard value.code != NSURLErrorCancelled, value.code != 102 else { return }
-        if let url = value.userInfo[NSURLErrorFailingURLErrorKey] as? URL, configuration.allows(url) { failedURL = url }
+        restoringReturnURL = false
+        if let url = value.userInfo[NSURLErrorFailingURLErrorKey] as? URL, allowsWebNavigation(to: url) { failedURL = url }
         showError("The page could not be loaded. Check your connection and try again.")
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if configuration.allows(url) {
+        if hasLoadedInitialPage, !restoringReturnURL, !navigationAction.shouldPerformDownload,
+           allowsWebNavigation(to: url) || url.absoluteString == "about:blank",
+           navigationAction.navigationType != .backForward,
+           navigationAction.navigationType != .reload,
+           navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == true {
+            // Save the current page before any top-level navigation. A script can redirect
+            // from about:blank with replaceState/location.replace and erase WebKit's back item.
+            captureReturnPage()
+            refreshControls()
+        }
+        if allowsWebNavigation(to: url) {
             if navigationAction.shouldPerformDownload { decisionHandler(.download) }
             else { decisionHandler(.allow) }
-        } else if url.absoluteString == "about:blank" || (url.scheme == "blob" && navigationAction.shouldPerformDownload) {
+        } else if url.absoluteString == "about:blank" {
+            if navigationAction.targetFrame?.isMainFrame == true {
+                captureReturnPage()
+                primaryBlankNavigation = true
+                refreshControls()
+            }
+            decisionHandler(.allow)
+        } else if url.scheme == "blob" && navigationAction.shouldPerformDownload {
             decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
         } else {
             decisionHandler(.cancel)
-            if navigationAction.navigationType == .linkActivated { openExternal(url) }
+            openExternal(url)
         }
     }
     private func openExternal(_ url: URL) {
-        let allowedSchemes = ["tel", "mailto", "sms", "facetime", "facetime-audio", "maps", "itms-apps"]
-        if allowedSchemes.contains(url.scheme?.lowercased() ?? "") {
-            UIApplication.shared.open(url); return
-        }
-        if url.scheme == "intent", let range = url.absoluteString.range(of: "S.browser_fallback_url=") {
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "intent", let range = url.absoluteString.range(of: "S.browser_fallback_url=") {
             let tail = url.absoluteString[range.upperBound...]
             let encoded = String(tail.prefix { $0 != ";" })
-            if let decoded = encoded.removingPercentEncoding, let fallback = URL(string: decoded), configuration.allows(fallback) { load(fallback) }
+            if let decoded = encoded.removingPercentEncoding, let fallback = URL(string: decoded), allowsWebNavigation(to: fallback) { load(fallback) }
+            return
+        }
+        guard !["", "http", "https", "about", "blob", "data", "file", "javascript"].contains(scheme) else { return }
+        if scheme == "mailto", presentMailComposer(for: url) { return }
+        // Let WebKit finish cancelling the navigation before handing control to another app.
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url, options: [:])
         }
     }
+    private func presentMailComposer(for url: URL) -> Bool {
+        guard MFMailComposeViewController.canSendMail(), presentedViewController == nil,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        let composer = MFMailComposeViewController()
+        composer.mailComposeDelegate = self
+        let recipient = components.path.removingPercentEncoding ?? components.path
+        let recipients = recipient.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+        if !recipients.isEmpty { composer.setToRecipients(recipients) }
+        for item in components.queryItems ?? [] {
+            switch item.name.lowercased() {
+            case "subject": composer.setSubject(item.value ?? "")
+            case "body": composer.setMessageBody(item.value ?? "", isHTML: false)
+            case "cc": composer.setCcRecipients((item.value ?? "").split(separator: ",").map(String.init))
+            case "bcc": composer.setBccRecipients((item.value ?? "").split(separator: ",").map(String.init))
+            default: break
+            }
+        }
+        present(composer, animated: true)
+        return true
+    }
+    func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+        controller.dismiss(animated: true)
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        if let url = navigationResponse.response.url, url.scheme != "blob" && !configuration.allows(url) { decisionHandler(.cancel); return }
+        if let url = navigationResponse.response.url,
+           url.scheme != "blob", url.absoluteString != "about:blank", !allowsWebNavigation(to: url) {
+            decisionHandler(.cancel); openExternal(url); return
+        }
         let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
         decisionHandler(!navigationResponse.canShowMIMEType || disposition.lowercased().contains("attachment") ? .download : .allow)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, self.configuration.allows(url) { webView.load(navigationAction.request) }
+        guard let url = navigationAction.request.url else { return nil }
+        if allowsWebNavigation(to: url) || url.absoluteString == "about:blank" {
+            captureReturnPage()
+            refreshControls()
+            webView.load(navigationAction.request)
+        } else {
+            openExternal(url)
+        }
         return nil
     }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
@@ -200,7 +311,7 @@ final class PlayerBrowserController: UIViewController, WKNavigationDelegate, WKU
         showError("The download failed. Please try again.")
     }
     func download(_ download: WKDownload, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, decisionHandler: @escaping (WKDownload.RedirectPolicy) -> Void) {
-        decisionHandler(request.url.map(configuration.allows) == true ? .allow : .cancel)
+        decisionHandler(request.url.map(allowsWebNavigation) == true ? .allow : .cancel)
     }
     deinit {
         for directory in downloadDirectories { try? FileManager.default.removeItem(at: directory) }

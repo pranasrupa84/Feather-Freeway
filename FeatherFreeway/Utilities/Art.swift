@@ -122,6 +122,7 @@ enum Art {
         case .featherFill: "up_feather"
         case .eggCarton: "up_carton"
         case .convoyCap: "up_convoy"
+        case .paddedTray: "up_carton"
         }
     }
 

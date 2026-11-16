@@ -178,11 +178,21 @@ final class ProfileStore {
     func recordRun(_ summary: RunSummary) -> RunOutcome {
         onFinishedRun?(summary)
         let achievedBefore = Set(achievements.filter(\.isEarned).map(\.id))
-        let reward = Economy.runReward(for: summary)
+        var reward = Economy.runReward(for: summary)
         var stars = 0
         var previousStars = 0
         var starBonus = 0
-        if let index = summary.mode.routeIndex, let route = RouteCatalog.route(index) {
+        if let order = summary.mode.deliveryOrder, let delivery = summary.delivery {
+            previousStars = profile.medals(forDelivery: order.id)
+            stars = summary.result == .cleared ? order.medals(eggs: delivery.eggs, duration: summary.duration) : 0
+            reward = stars > 0 ? delivery.eggs * 3 + stars * 5 : 0
+            if stars > previousStars {
+                let missing = DeliveryOrder.orders.count - profile.deliveryMedals.count
+                if missing > 0 { profile.deliveryMedals += Array(repeating: 0, count: missing) }
+                profile.deliveryMedals[order.id] = stars
+                starBonus = (stars - previousStars) * (30 + order.id * 10)
+            }
+        } else if let index = summary.mode.routeIndex, let route = RouteCatalog.route(index) {
             previousStars = profile.stars(forRoute: index)
             stars = RouteCatalog.stars(for: summary, route: route)
             if profile.routeStars.count < RouteCatalog.count {
@@ -210,7 +220,8 @@ final class ProfileStore {
         profile.totalLateMerges += summary.lateMerges
         profile.totalExpressTolls += summary.expressTolls
 
-        let errandsDone = advanceErrands(with: summary, newStars: max(0, stars - previousStars))
+        let routeStarsEarned = summary.mode.deliveryOrder == nil ? max(0, stars - previousStars) : 0
+        let errandsDone = advanceErrands(with: summary, newStars: routeStarsEarned)
         context.insert(RunRecord(summary: summary, reward: reward + starBonus, stars: stars, date: now()))
         persistQuietly()
         pruneOldRuns()

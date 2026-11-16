@@ -4,6 +4,18 @@ import Foundation
 enum RunMode: Hashable, Sendable {
     case endless
     case route(Int)
+    case delivery(DeliveryOrder)
+
+    var deliveryOrder: DeliveryOrder? {
+        if case .delivery(let order) = self { return order }
+        return nil
+    }
+
+    var road: Route? {
+        if let deliveryOrder { return deliveryOrder.road }
+        guard let routeIndex else { return nil }
+        return RouteCatalog.route(routeIndex)
+    }
 
     var routeIndex: Int? {
         if case .route(let i) = self { return i }
@@ -14,6 +26,7 @@ enum RunMode: Hashable, Sendable {
         switch self {
         case .endless: "endless"
         case .route(let i): "route-\(i)"
+        case .delivery(let order): "delivery-\(order.id)"
         }
     }
 }
@@ -121,6 +134,7 @@ enum RunEvent: Equatable, Sendable {
     case rigEnd
     case smash(id: Int, x: Double, y: Double, wave: Bool)
     case bump(x: Double, y: Double)
+    case cargoProtected(remaining: Int)
     case cushion
     case crash(x: Double, y: Double)
     case eggThrown
@@ -160,4 +174,5 @@ struct RunSummary: Equatable, Sendable {
     var bumps: Int
     var duration: Double
     var furthestWorld: World
+    var delivery: DeliveryResult? = nil
 }

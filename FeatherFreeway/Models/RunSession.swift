@@ -14,7 +14,7 @@ struct RunConfig: Equatable, Sendable {
     init(mode: RunMode, loadout: Loadout) {
         stats = loadout.stats
         trait = loadout.breed.trait
-        if let index = mode.routeIndex, let route = RouteCatalog.route(index) {
+        if let route = mode.road {
             mechanics = route.mechanics
             startSpeed = route.startSpeed
             maxSpeed = route.startSpeed + 220
@@ -116,12 +116,16 @@ final class RunSession {
     private var announcedClosures: Set<Double> = []
     private var lastInClosingLaneY: Double?
 
+    private(set) var cargoEggs = 0
+    private(set) var deliveryPath: DeliveryPath?
+    private var trayProtection = 0
+
     init(setup: RunSetup, loadout: Loadout) {
         self.setup = setup
         breed = loadout.breed
         config = RunConfig(mode: setup.mode, loadout: loadout)
         rng = SeededGenerator(seed: setup.seed)
-        if let index = setup.mode.routeIndex, let route = RouteCatalog.route(index) {
+        if let route = setup.mode.road {
             plan = RoadPlan(route: route)
         } else {
             plan = RoadPlan(endlessSeed: setup.seed)
@@ -138,6 +142,8 @@ final class RunSession {
         currentWorld = plan.world(at: 0)
         nextJamTime = 9
         nextWaveTime = 15
+        cargoEggs = setup.mode.deliveryOrder?.eggs ?? 0
+        trayProtection = config.stats.trayProtection
     }
 
     // MARK: - Derived state
@@ -157,7 +163,36 @@ final class RunSession {
     var displayScore: Int { Int(score) }
     var isInvulnerable: Bool { graceTime > 0 }
     var rigDuration: Double { config.stats.rigDuration + config.trait.rigBonusSeconds }
-    var finishY: Double? { plan.finishY }
+    var finishY: Double? {
+        if deliveryPath == .shortcut, let order = setup.mode.deliveryOrder {
+            return Double(order.shortcutMeters) * RoadGeometry.unitsPerMeter
+        }
+        return plan.finishY
+    }
+
+    var canChooseDeliveryPath: Bool {
+        guard let order = setup.mode.deliveryOrder else { return false }
+        return deliveryPath == nil && meters >= order.forkMeters && !isOver
+    }
+
+    func chooseDeliveryPath(_ path: DeliveryPath) {
+        guard canChooseDeliveryPath else { return }
+        deliveryPath = path
+        guard path == .shortcut, let finishY else { return }
+        // Two lanes of roadworks, with a changing open lane on each row.
+        for row in 0..<6 {
+            let y = distance + 850 + Double(row) * 610
+            guard y < finishY - 450 else { break }
+            let lanes = plan.lanes(at: y)
+            let openLane = Int.random(in: 0..<lanes, using: &rng)
+            let firstLane = (openLane + 1) % lanes
+            spawn(.pothole, x: RoadGeometry.laneCenter(firstLane), y: y)
+            if lanes > 2 {
+                let secondLane = (openLane + 2) % lanes
+                spawn(.pothole, x: RoadGeometry.laneCenter(secondLane), y: y)
+            }
+        }
+    }
     /// 0...1 progress along a route.
     var progress: Double? { finishY.map { min(1, distance / $0) } }
 
@@ -231,6 +266,9 @@ final class RunSession {
         baseSpeed = min(config.maxSpeed, baseSpeed + config.acceleration * dt)
         let previousY = distance
         distance += speed * dt
+        if let order = setup.mode.deliveryOrder, meters >= order.forkMeters + 65 {
+            chooseDeliveryPath(.detour)
+        }
         plan.extend(to: distance + 8000)
         score += (distance - previousY) / RoadGeometry.unitsPerMeter * multiplier
 
@@ -607,6 +645,20 @@ final class RunSession {
     private func bump(at e: Entity) -> Bool {
         guard !isInvulnerable, !isOver else { return false }
         if debugInvincible { return true }
+        if setup.mode.deliveryOrder != nil {
+            if trayProtection > 0 {
+                trayProtection -= 1
+                emit(.cargoProtected(remaining: trayProtection))
+            } else {
+                let damage = e.kind == .pothole || isSmall(e) ? 1 : 2
+                cargoEggs = max(0, cargoEggs - damage)
+            }
+            bumps += 1
+            graceTime = Self.bumpGrace
+            baseSpeed = max(config.startSpeed, baseSpeed * 0.85)
+            emit(.bump(x: e.x, y: e.y))
+            return isSmall(e)
+        }
         if chicks > 0 {
             let lost = max(1, (chicks + 1) / 2)
             chicks -= lost
@@ -771,7 +823,8 @@ final class RunSession {
             expressTolls: expressTolls,
             bumps: bumps,
             duration: time,
-            furthestWorld: currentWorld
+            furthestWorld: currentWorld,
+            delivery: setup.mode.deliveryOrder.map { _ in DeliveryResult(eggs: cargoEggs, path: deliveryPath) }
         )
     }
 

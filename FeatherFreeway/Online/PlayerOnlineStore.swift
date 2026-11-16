@@ -192,6 +192,7 @@ final class PlayerOnlineStore {
         }
     }
     func enqueue(_ summary: RunSummary) {
+        guard summary.mode.deliveryOrder == nil else { return }
         guard !disabled, let identity, !appid.isEmpty else { return }
         let item = PendingScore(gameId: UUID(), appid: appid, ad_id: identity, score: summary.score,
                                 completedAt: Self.scoreTimestampFormatter.string(from: .now), duration: summary.duration,
